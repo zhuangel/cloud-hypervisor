@@ -28,6 +28,13 @@ pub struct CpuTopology {
     pub packages: u8,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct DiskLatency {
+    pub low: u64,
+    pub mid: u64,
+    pub hig: u64,
+}
+
 // When booting with PVH boot the maximum physical addressable size
 // is a 46 bit address space even when the host supports with 5-level
 // paging.
@@ -225,6 +232,8 @@ pub struct DiskConfig {
     pub disable_io_uring: bool,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub latency: Option<DiskLatency>,
 }
 
 pub const DEFAULT_DISK_NUM_QUEUES: usize = 1;
@@ -254,6 +263,7 @@ impl Default for DiskConfig {
             disable_io_uring: false,
             rate_limiter_config: None,
             pci_segment: 0,
+            latency: None,
         }
     }
 }

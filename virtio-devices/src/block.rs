@@ -104,6 +104,7 @@ struct BlockEpollHandler {
     rate_limiter: Option<RateLimiter>,
     access_platform: Option<Arc<dyn AccessPlatform>>,
     read_only: bool,
+    latency: (bool, u64, u64, u64),
 }
 
 impl BlockEpollHandler {
@@ -399,6 +400,7 @@ pub struct Block {
     rate_limiter_config: Option<RateLimiterConfig>,
     exit_evt: EventFd,
     read_only: bool,
+    latency: (bool, u64, u64, u64),
 }
 
 #[derive(Versionize)]
@@ -426,6 +428,7 @@ impl Block {
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
+        latency: (bool, u64, u64, u64),
         state: Option<BlockState>,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
@@ -525,6 +528,7 @@ impl Block {
             rate_limiter_config,
             exit_evt,
             read_only,
+            latency,
         })
     }
 
@@ -658,6 +662,7 @@ impl VirtioDevice for Block {
                 rate_limiter,
                 access_platform: self.common.access_platform.clone(),
                 read_only: self.read_only,
+                latency: self.latency,
             };
 
             let paused = self.common.paused.clone();

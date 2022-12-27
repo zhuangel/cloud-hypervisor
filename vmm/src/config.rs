@@ -820,6 +820,36 @@ impl MemoryConfig {
     }
 }
 
+pub enum DiskLatencyParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for DiskLatency {
+    type Err = DiskLatencyParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split(':').collect();
+
+        if parts.len() != 3 {
+            return Err(Self::Err::InvalidValue(s.to_owned()));
+        }
+
+        let t = DiskLatency {
+            low: parts[0]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+            mid: parts[1]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+            hig: parts[2]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+        };
+
+        Ok(t)
+    }
+}
+
 impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,\
@@ -827,7 +857,8 @@ impl DiskConfig {
          vhost_user=on|off,socket=<vhost_user_socket_path>,\
          bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
          ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
-         id=<device_id>,pci_segment=<segment_id>\"";
+         id=<device_id>,pci_segment=<segment_id>,\
+         latency=<low_micros>:<mid_micros>:<high_micros>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -848,6 +879,7 @@ impl DiskConfig {
             .add("ops_refill_time")
             .add("id")
             .add("_disable_io_uring")
+            .add("latency")
             .add("pci_segment");
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
@@ -891,6 +923,7 @@ impl DiskConfig {
             .convert("pci_segment")
             .map_err(Error::ParseDisk)?
             .unwrap_or_default();
+        let latency = parser.convert("latency").map_err(Error::ParseDisk)?;
         let bw_size = parser
             .convert("bw_size")
             .map_err(Error::ParseDisk)?
@@ -955,7 +988,12 @@ impl DiskConfig {
             id,
             disable_io_uring,
             pci_segment,
+            latency,
         })
+    }
+
+    pub fn get_latency(&self) -> Option<(bool, u64, u64, u64)> {
+        self.latency.clone().map(|t| (true, t.low, t.mid, t.hig))
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {

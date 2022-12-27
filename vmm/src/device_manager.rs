@@ -2130,6 +2130,8 @@ impl DeviceManager {
 
         info!("Creating virtio-block device: {:?}", disk_cfg);
 
+        let latency: (bool, u64, u64, u64) = disk_cfg.get_latency().unwrap_or((false, 0, 0, 0));
+
         let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
 
         let (virtio_device, migratable_device) = if disk_cfg.vhost_user {
@@ -2247,6 +2249,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
+                    latency,
                     snapshot
                         .map(|s| s.to_versioned_state())
                         .transpose()
