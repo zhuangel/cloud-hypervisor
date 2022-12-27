@@ -26,6 +26,7 @@ use block_util::{
 use rate_limiter::{RateLimiter, TokenType};
 use seccompiler::SeccompAction;
 use std::io;
+use std::iter;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
@@ -33,6 +34,7 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
+use std::time::Instant;
 use std::{collections::HashMap, convert::TryInto};
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
@@ -79,12 +81,31 @@ pub enum Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct BlockCounters {
     read_bytes: Arc<AtomicU64>,
     read_ops: Arc<AtomicU64>,
+    read_latency: Vec<Arc<AtomicU64>>,
     write_bytes: Arc<AtomicU64>,
     write_ops: Arc<AtomicU64>,
+    write_latency: Vec<Arc<AtomicU64>>,
+}
+
+impl Default for BlockCounters {
+    fn default() -> Self {
+        BlockCounters {
+            read_bytes: Arc::new(AtomicU64::new(0)),
+            read_ops: Arc::new(AtomicU64::new(0)),
+            read_latency: iter::repeat_with(|| Arc::new(AtomicU64::new(0)))
+                .take(4)
+                .collect(),
+            write_bytes: Arc::new(AtomicU64::new(0)),
+            write_ops: Arc::new(AtomicU64::new(0)),
+            write_latency: iter::repeat_with(|| Arc::new(AtomicU64::new(0)))
+                .take(4)
+                .collect(),
+        }
+    }
 }
 
 struct BlockEpollHandler {
@@ -116,6 +137,10 @@ impl BlockEpollHandler {
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
                 .map_err(Error::RequestParsing)?;
+
+            if self.latency.0 {
+                request.start = Some(Instant::now());
+            }
 
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
@@ -223,6 +248,8 @@ impl BlockEpollHandler {
         let mut write_bytes = Wrapping(0);
         let mut read_ops = Wrapping(0);
         let mut write_ops = Wrapping(0);
+        let mut read_latency: Vec<Wrapping<u64>> = iter::repeat(Wrapping(0)).take(4).collect();
+        let mut write_latency: Vec<Wrapping<u64>> = iter::repeat(Wrapping(0)).take(4).collect();
 
         let completion_list = self.disk_image.complete();
         for (user_data, result) in completion_list {
@@ -239,6 +266,14 @@ impl BlockEpollHandler {
                         for (_, data_len) in &request.data_descriptors {
                             read_bytes += Wrapping(*data_len as u64);
                         }
+                        if let Some(start) = request.start {
+                            match start.elapsed().as_micros() as u64 {
+                                d if d <= self.latency.1 => read_latency[0] += Wrapping(1),
+                                d if d <= self.latency.2 => read_latency[1] += Wrapping(1),
+                                d if d <= self.latency.3 => read_latency[2] += Wrapping(1),
+                                _ => read_latency[3] += Wrapping(1),
+                            }
+                        }
                         read_ops += Wrapping(1);
                     }
                     RequestType::Out => {
@@ -247,6 +282,14 @@ impl BlockEpollHandler {
                         }
                         for (_, data_len) in &request.data_descriptors {
                             write_bytes += Wrapping(*data_len as u64);
+                        }
+                        if let Some(start) = request.start {
+                            match start.elapsed().as_micros() as u64 {
+                                d if d <= self.latency.1 => write_latency[0] += Wrapping(1),
+                                d if d <= self.latency.2 => write_latency[1] += Wrapping(1),
+                                d if d <= self.latency.3 => write_latency[2] += Wrapping(1),
+                                _ => write_latency[3] += Wrapping(1),
+                            }
                         }
                         write_ops += Wrapping(1);
                     }
@@ -285,6 +328,16 @@ impl BlockEpollHandler {
         self.counters
             .read_ops
             .fetch_add(read_ops.0, Ordering::AcqRel);
+
+        if self.latency.0 {
+            for (idx, latency) in self.counters.write_latency.iter_mut().enumerate() {
+                latency.fetch_add(write_latency[idx].0, Ordering::AcqRel);
+            }
+
+            for (idx, latency) in self.counters.read_latency.iter_mut().enumerate() {
+                latency.fetch_add(read_latency[idx].0, Ordering::AcqRel);
+            }
+        }
 
         Ok(used_descs)
     }
@@ -709,6 +762,66 @@ impl VirtioDevice for Block {
             "write_ops",
             Wrapping(self.counters.write_ops.load(Ordering::Acquire)),
         );
+
+        if self.latency.0 {
+            for (idx, latency) in self.counters.read_latency.iter().enumerate() {
+                match idx {
+                    0 => {
+                        counters.insert(
+                            "read_latency_low",
+                            Wrapping(latency.load(Ordering::Acquire)),
+                        );
+                    }
+                    1 => {
+                        counters.insert(
+                            "read_latency_mid",
+                            Wrapping(latency.load(Ordering::Acquire)),
+                        );
+                    }
+                    2 => {
+                        counters.insert(
+                            "read_latency_high",
+                            Wrapping(latency.load(Ordering::Acquire)),
+                        );
+                    }
+                    _ => {
+                        counters.insert(
+                            "read_latency_huge",
+                            Wrapping(latency.load(Ordering::Acquire)),
+                        );
+                    }
+                }
+            }
+
+            for (idx, latency) in self.counters.write_latency.iter().enumerate() {
+                match idx {
+                    0 => {
+                        counters.insert(
+                            "write_latency_low",
+                            Wrapping(latency.load(Ordering::Acquire)),
+                        );
+                    }
+                    1 => {
+                        counters.insert(
+                            "write_latency_mid",
+                            Wrapping(latency.load(Ordering::Acquire)),
+                        );
+                    }
+                    2 => {
+                        counters.insert(
+                            "write_latency_high",
+                            Wrapping(latency.load(Ordering::Acquire)),
+                        );
+                    }
+                    _ => {
+                        counters.insert(
+                            "write_latency_huge",
+                            Wrapping(latency.load(Ordering::Acquire)),
+                        );
+                    }
+                }
+            }
+        }
 
         Some(counters)
     }
