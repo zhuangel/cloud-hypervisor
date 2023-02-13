@@ -5084,6 +5084,117 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_virtio_net_donate() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest1 = Guest::new(Box::new(focal));
+        let api_socket1 = temp_api_path(&guest.tmp_dir);
+
+        let mut child1 = GuestCommand::new(&guest1)
+            .args(["--api-socket", &api_socket1])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        thread::sleep(std::time::Duration::new(1, 0));
+
+        // Verify API server is running
+        curl_command(&api_socket, "GET", "http://localhost/api/v1/vmm.ping", None);
+
+        // Verify API server is running
+        curl_command(&api_socket1, "GET", "http://localhost/api/v1/vmm.ping", None);
+
+        // Create the VM first
+        let cpu_count: u8 = 4;
+        let addnet_body = guest.api_create_addnet(
+            cpu_count,
+            direct_kernel_boot_path().to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+        );
+
+        let http_body = guest.api_create_body();
+
+        let r = std::panic::catch_unwind(|| {
+            // Create first VM.
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.create",
+                Some(&http_body),
+            );
+
+            // Then add net device
+            /*
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.addnet",
+                Some(&addnet_body),
+            );
+            */
+
+            // Then boot it
+            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+
+            guest.wait_vm_boot(None).unwrap();
+
+            // Then delete it
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.delete",
+                None,
+            );
+
+            // Create second VM.
+            curl_command(
+                &api_socket1,
+                "PUT",
+                "http://localhost/api/v1/vm.create",
+                Some(&http_body1),
+            );
+
+            // Then add net device
+            /*
+            curl_command(
+                &api_socket1,
+                "PUT",
+                "http://localhost/api/v1/vm.addnet",
+                Some(&addnet_body),
+            );
+            */
+
+            // Then boot it
+            curl_command(&api_socket1, "PUT", "http://localhost/api/v1/vm.boot", None);
+
+            guest.wait_vm_boot(None).unwrap();
+
+            // Then delete it
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.delete",
+                None,
+            );
+        });
+
+        let _ = child.kill();
+        let _ = child2.kill();
+        let output = child2.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_virtio_block_topology() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));

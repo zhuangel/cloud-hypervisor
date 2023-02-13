@@ -817,6 +817,8 @@ impl Vmm {
             self.vm_shutdown()?;
         }
 
+        self.vm_config.as_mut().unwrap().lock().unwrap().release();
+
         self.vm_config = None;
 
         event!("vm", "deleted");

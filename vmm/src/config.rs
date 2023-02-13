@@ -2102,6 +2102,24 @@ impl VmConfig {
     pub fn is_tdx_enabled(&self) -> bool {
         self.platform.as_ref().map(|p| p.tdx).unwrap_or(false)
     }
+
+    // Release resource hold by VmConfig.
+    pub fn release(&mut self) {
+        let mut net_devices = self.net.clone();
+
+        if let Some(net_list_cfg) = &mut net_devices {
+            for net_cfg in net_list_cfg.iter_mut() {
+                // 'fds' is donate from other process,
+                // close fds before drop VmConfig.
+                if let Some(fds) = &net_cfg.fds {
+                    for fd in fds.iter() {
+                        unsafe { libc::close(*fd) };
+                    }
+                }
+            }
+        }
+        self.net = None;
+    }
 }
 
 #[cfg(test)]
