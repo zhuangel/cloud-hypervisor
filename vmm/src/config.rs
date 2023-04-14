@@ -741,6 +741,25 @@ impl MemoryConfig {
 
         size
     }
+
+    pub fn support_fast_restore(&self) -> bool {
+        if self.shared {
+            return false;
+        }
+
+        if let Some(zones) = &self.zones {
+            for zone in zones.iter() {
+                if zone.shared {
+                    return false;
+                }
+                if zone.file.is_some() {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
 }
 
 impl DiskConfig {
