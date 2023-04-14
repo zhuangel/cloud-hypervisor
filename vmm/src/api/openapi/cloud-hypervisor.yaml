@@ -1120,6 +1120,8 @@ components:
           type: string
         prefault:
           type: boolean
+        mmap_file:
+          type: boolean
 
     ReceiveMigrationData:
       required:

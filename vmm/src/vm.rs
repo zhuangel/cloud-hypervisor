@@ -749,6 +749,7 @@ impl Vm {
         snapshot: Option<Snapshot>,
         source_url: Option<&str>,
         prefault: Option<bool>,
+        mmap_file: Option<bool>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new");
 
@@ -778,6 +779,7 @@ impl Vm {
                 &vm_config.lock().unwrap().memory.clone(),
                 source_url,
                 prefault.unwrap(),
+                mmap_file.unwrap(),
                 phys_bits,
             )
             .map_err(Error::MemoryManager)?

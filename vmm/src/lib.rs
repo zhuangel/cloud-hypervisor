@@ -585,6 +585,7 @@ impl Vmm {
                         None,
                         None,
                         None,
+                        None,
                     )?;
 
                     self.vm = Some(vm);
@@ -683,6 +684,7 @@ impl Vmm {
             Some(snapshot),
             Some(source_url),
             Some(restore_cfg.prefault),
+            Some(restore_cfg.mmap_file),
         )?;
         self.vm = Some(vm);
 
@@ -760,6 +762,7 @@ impl Vmm {
             serial_pty,
             console_pty,
             console_resize_pipe,
+            None,
             None,
             None,
             None,

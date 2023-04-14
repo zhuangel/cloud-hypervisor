@@ -1191,13 +1191,14 @@ impl MemoryManager {
         config: &MemoryConfig,
         source_url: Option<&str>,
         prefault: bool,
+        mmap_file: bool,
         phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         if let Some(source_url) = source_url {
             let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
             memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
-            let (mmap_memory_file, memory_file) = if config.support_fast_restore() {
+            let (mmap_memory_file, memory_file) = if mmap_file && config.support_fast_restore() {
                 info!("restore non-shared map, speed up restore by share map memory file");
                 (
                     true,
