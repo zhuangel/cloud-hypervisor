@@ -1930,9 +1930,18 @@ impl VmConfig {
             }
         }
 
+        // The 'conflict' check is introduced in commit 24438e0390d3
+        // (vm-virtio: Enable the vmm support for virtio-console).
+        //
+        // Allow double tty mode, for someone want to use virtio console
+        // for better performance, and want to keep legacy serial to catch
+        // boot stage logs for debug.
+        // Using such double tty mode, you need to configure the kernel
+        // properly, such as:
+        // "console=hvc0 earlyprintk=ttyS0"
         if self.console.mode == ConsoleOutputMode::Tty && self.serial.mode == ConsoleOutputMode::Tty
         {
-            return Err(ValidationError::DoubleTtyMode);
+            info!("{}", ValidationError::DoubleTtyMode);
         }
 
         if self.console.mode == ConsoleOutputMode::File && self.console.file.is_none() {
@@ -3110,10 +3119,7 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.serial.mode = ConsoleOutputMode::Tty;
         invalid_config.console.mode = ConsoleOutputMode::Tty;
-        assert_eq!(
-            invalid_config.validate(),
-            Err(ValidationError::DoubleTtyMode)
-        );
+        assert!(valid_config.validate().is_ok());
 
         let mut invalid_config = valid_config.clone();
         invalid_config.payload = None;
