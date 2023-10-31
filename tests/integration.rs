@@ -1129,6 +1129,64 @@ fn _test_power_button(acpi: bool) {
     handle_child_output(r, &output);
 }
 
+#[allow(unused_variables)]
+fn test_double_tty(acpi: bool) {
+    let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+    let guest = Guest::new(Box::new(focal));
+    let mut cmd = GuestCommand::new(&guest);
+    let api_socket = temp_api_path(&guest.tmp_dir);
+    #[cfg(target_arch = "x86_64")]
+    let tty_str: &str = "console=hvc0 earlyprintk=ttyS0 ";
+    #[cfg(target_arch = "aarch64")]
+    let tty_str: &str = "console=hvc0 earlyprintk=ttyAMA0 ";
+
+    #[cfg(target_arch = "x86_64")]
+    let kernel_path = direct_kernel_boot_path();
+    #[cfg(target_arch = "aarch64")]
+    let kernel_path = if acpi {
+        edk2_path()
+    } else {
+        direct_kernel_boot_path()
+    };
+
+    cmd.args(["--cpus", "boot=1"])
+        .args(["--memory", "size=512M"])
+        .args(["--kernel", kernel_path.to_str().unwrap()])
+        .args([
+            "--cmdline",
+            DIRECT_KERNEL_BOOT_CMDLINE
+                .replace("console=hvc0 ", tty_str)
+                .as_str(),
+        ])
+        .capture_output()
+        .default_disks()
+        .default_net()
+        .args(["--api-socket", &api_socket]);
+
+    let child = cmd.spawn().unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot(None).unwrap();
+    });
+
+    let _ = child.kill();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    //parse_tty_output();
+    let s = String::from_utf8_lossy(output);
+    assert!(!s.contains(tty_str));
+    handle_child_output(r, &output);
+}
+
+type PrepareNetDaemon = dyn Fn(
+    &TempDir,
+    &str,
+    Option<&str>,
+    Option<u16>,
+    usize,
+    bool,
+) -> (std::process::Command, String);
+
 type PrepareNetDaemon = dyn Fn(
     &TempDir,
     &str,
